@@ -1,0 +1,106 @@
+1- instal plivo package : composer require plivo/plivo-php  
+
+2-add cardinationls to .env file : 
+PLIVO_AUTH_ID=your_auth_id
+PLIVO_AUTH_TOKEN=your_auth_token
+PLIVO_FROM_NUMBER=your_registered_plivo_number
+
+3- add this to your config/service file : 
+    'plivo' => [
+        'auth_id' => env('PLIVO_AUTH_ID'),
+        'auth_token' => env('PLIVO_AUTH_TOKEN'),
+        'from_number' => env('PLIVO_FROM_NUMBER'),
+    ],
+
+4-create laravel notification :
+php artisan make:notification PlivoSmsNotification
+
+5-add this to the notification :
+use Illuminate\Notifications\Notification;
+use Plivo\RestClient;
+
+class PlivoSmsNotification extends Notification
+{
+    protected $message;
+    protected $to;
+
+    public function __construct(string $to, string $message)
+    {
+        $this->to = $to;
+        $this->message = $message;
+    }
+
+    /**
+     * Specify which channels this notification supports.
+     */
+    public function via($notifiable)
+    {
+        return ['plivo'];
+    }
+
+    /**
+     * Send the notification via Plivo.
+     */
+    public function toPlivo($notifiable)
+    {
+        $client = new RestClient(
+            config('services.plivo.auth_id'),
+            config('services.plivo.auth_token')
+        );
+
+        try {
+            $response = $client->messages->create(
+                config('services.plivo.from_number'), // From number
+                [$this->to],                         // To number
+                $this->message                       // Message content
+            );
+
+            return $response;
+        } catch (\Exception $e) {
+            return $e->getMessage();
+        }
+    }
+}
+
+
+6-create channel : php artisan make:channel PlivoSmsChannel
+
+7- add send function to chanel :
+
+use Illuminate\Notifications\Notification;
+
+    public function send($notifiable, Notification $notification)
+    {
+        if (method_exists($notification, 'toPlivo')) {
+            return $notification->toPlivo($notifiable);
+        }
+
+        throw new \Exception("Notification does not support Plivo channel.");
+    }
+
+
+
+8-addthis channel to appserviceProvider in boot function :
+
+    Notification::extend('plivo', function ($app) {
+        return new \App\Channels\PlivoSmsChannel();
+    });
+
+
+9-declare your controller function :
+use App\Notifications\PlivoSmsNotification;
+use Illuminate\Support\Facades\Notification;
+
+    public function sendSms()
+    {
+        $phone = '+1234567890'; // Replace with the recipient's phone number
+        $message = 'Hello, this is a test message from Plivo!';
+
+        Notification::route('plivo', $phone)
+            ->notify(new PlivoSmsNotification($phone, $message));
+
+        return response()->json(['status' => 'SMS sent successfully!']);
+    }
+
+
+10-
